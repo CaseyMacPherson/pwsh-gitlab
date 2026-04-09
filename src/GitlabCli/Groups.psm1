@@ -516,3 +516,186 @@ function Remove-GitlabGroupToGroupShare {
         }
     }
 }
+
+function Get-GitlabGroupSharedProject {
+
+    [CmdletBinding()]
+    [OutputType('Gitlab.Project')]
+    param (
+        [Parameter(Mandatory, Position=0)]
+        [string]
+        $GroupId,
+
+        [Parameter()]
+        [string]
+        $Search,
+
+        [Parameter()]
+        [ValidateSet('public', 'internal', 'private')]
+        [string]
+        $Visibility,
+
+        [Parameter()]
+        [ValidateSet('id', 'name', 'path', 'created_at', 'updated_at', 'star_count', 'last_activity_at')]
+        [string]
+        $OrderBy,
+
+        [Parameter()]
+        [ValidateSet('asc', 'desc')]
+        [string]
+        $Sort,
+
+        [Parameter()]
+        [switch]
+        $Archived,
+
+        [Parameter()]
+        [switch]
+        $Simple,
+
+        [Parameter()]
+        [switch]
+        $Starred,
+
+        [Parameter()]
+        [switch]
+        $WithIssuesEnabled,
+
+        [Parameter()]
+        [switch]
+        $WithMergeRequestsEnabled,
+
+        [Parameter()]
+        [uint]
+        $MinAccessLevel,
+
+        [Parameter()]
+        [uint]
+        $MaxPages,
+
+        [Parameter()]
+        [switch]
+        $All,
+
+        [Parameter()]
+        [string]
+        $SiteUrl
+    )
+
+    $GroupId = Resolve-LocalGroupPath -GroupId $GroupId
+    $MaxPages = Resolve-GitlabMaxPages -MaxPages:$MaxPages -All:$All
+
+    $Query = @{}
+    if ($Search) {
+        $Query.search = $Search
+    }
+    if ($Visibility) {
+        $Query.visibility = $Visibility
+    }
+    if ($OrderBy) {
+        $Query.order_by = $OrderBy
+    }
+    if ($Sort) {
+        $Query.sort = $Sort
+    }
+    if ($PSBoundParameters.ContainsKey('Archived')) {
+        $Query.archived = $Archived.ToString().ToLower()
+    }
+    if ($Simple) {
+        $Query.simple = 'true'
+    }
+    if ($Starred) {
+        $Query.starred = 'true'
+    }
+    if ($WithIssuesEnabled) {
+        $Query.with_issues_enabled = 'true'
+    }
+    if ($WithMergeRequestsEnabled) {
+        $Query.with_merge_requests_enabled = 'true'
+    }
+    if ($MinAccessLevel) {
+        $Query.min_access_level = $MinAccessLevel
+    }
+
+    # https://docs.gitlab.com/api/groups/#list-shared-projects
+    Invoke-GitlabApi GET "groups/$($GroupId | ConvertTo-UrlEncoded)/projects/shared" -Query $Query -MaxPages $MaxPages |
+        New-GitlabObject 'Gitlab.Project'
+}
+
+function Get-GitlabGroupSharedGroup {
+
+    [CmdletBinding()]
+    [OutputType('Gitlab.Group')]
+    param (
+        [Parameter(Mandatory, Position=0)]
+        [string]
+        $GroupId,
+
+        [Parameter()]
+        [string]
+        $Search,
+
+        [Parameter()]
+        [ValidateSet('public', 'internal', 'private')]
+        [string]
+        $Visibility,
+
+        [Parameter()]
+        [ValidateSet('name', 'path', 'id', 'similarity')]
+        [string]
+        $OrderBy,
+
+        [Parameter()]
+        [ValidateSet('asc', 'desc')]
+        [string]
+        $Sort,
+
+        [Parameter()]
+        [int[]]
+        $SkipGroups,
+
+        [Parameter()]
+        [uint]
+        $MinAccessLevel,
+
+        [Parameter()]
+        [uint]
+        $MaxPages,
+
+        [Parameter()]
+        [switch]
+        $All,
+
+        [Parameter()]
+        [string]
+        $SiteUrl
+    )
+
+    $GroupId = Resolve-LocalGroupPath -GroupId $GroupId
+    $MaxPages = Resolve-GitlabMaxPages -MaxPages:$MaxPages -All:$All
+
+    $Query = @{}
+    if ($Search) {
+        $Query.search = $Search
+    }
+    if ($Visibility) {
+        $Query.visibility = $Visibility
+    }
+    if ($OrderBy) {
+        $Query.order_by = $OrderBy
+    }
+    if ($Sort) {
+        $Query.sort = $Sort
+    }
+    if ($SkipGroups) {
+        $Query.skip_groups = $SkipGroups
+    }
+    if ($MinAccessLevel) {
+        $Query.min_access_level = $MinAccessLevel
+    }
+
+    # https://docs.gitlab.com/api/groups/#list-shared-groups
+    Invoke-GitlabApi GET "groups/$($GroupId | ConvertTo-UrlEncoded)/groups/shared" -Query $Query -MaxPages $MaxPages |
+        New-GitlabObject 'Gitlab.Group'
+}
+

@@ -73,10 +73,27 @@ function Invoke-GitlabApi {
         foreach($Name in $Query.Keys) {
             $Value = $Query[$Name]
             if ($Value) {
-                $SerializedQuery += $Delimiter
-                $SerializedQuery += "$Name="
-                $SerializedQuery += $Value | ConvertTo-UrlEncoded
-                $Delimiter = '&'
+                if ($Value -is [array]) {
+                    if ($Name.EndsWith('[]')) {
+                        foreach ($Item in $Value) {
+                            $SerializedQuery += $Delimiter
+                            $SerializedQuery += "$Name="
+                            $SerializedQuery += $Item | ConvertTo-UrlEncoded
+                            $Delimiter = '&'
+                        }
+                    } else {
+                        $Value = ($Value | ForEach-Object { $_ | ConvertTo-UrlEncoded }) -join ','
+                        $SerializedQuery += $Delimiter
+                        $SerializedQuery += "$Name="
+                        $SerializedQuery += $Value
+                        $Delimiter = '&'
+                    }
+                } else {
+                    $SerializedQuery += $Delimiter
+                    $SerializedQuery += "$Name="
+                    $SerializedQuery += $Value | ConvertTo-UrlEncoded
+                    $Delimiter = '&'
+                }
             }
         }
     }

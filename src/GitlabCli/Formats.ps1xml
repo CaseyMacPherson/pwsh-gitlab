@@ -937,6 +937,55 @@
       </TableControl>
     </View>
     <View>
+      <Name>Gitlab.MembershipReport</Name>
+      <ViewSelectedBy>
+        <TypeName>Gitlab.MembershipReport</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader/>
+          <TableColumnHeader/>
+          <TableColumnHeader>
+            <Label>EffectiveAccess</Label>
+          </TableColumnHeader>
+          <TableColumnHeader>
+            <Label>Sources</Label>
+            <Alignment>Right</Alignment>
+          </TableColumnHeader>
+          <TableColumnHeader>
+            <Label>Overlapping</Label>
+          </TableColumnHeader>
+          <TableColumnHeader>
+            <Label>SourceDetails</Label>
+          </TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem>
+                <PropertyName>Username</PropertyName>
+              </TableColumnItem>
+              <TableColumnItem>
+                <PropertyName>Name</PropertyName>
+              </TableColumnItem>
+              <TableColumnItem>
+                <PropertyName>EffectiveAccessLevelName</PropertyName>
+              </TableColumnItem>
+              <TableColumnItem>
+                <PropertyName>SourceCount</PropertyName>
+              </TableColumnItem>
+              <TableColumnItem>
+                <PropertyName>IsOverlapping</PropertyName>
+              </TableColumnItem>
+              <TableColumnItem>
+                <ScriptBlock>($_.Sources | ForEach-Object { "$($_.SourceType):$($_.SourcePath)[$($_.AccessLevelName)]$(if ($_.DiffersFromEffective) { '*' })" }) -join ', '</ScriptBlock>
+              </TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+    <View>
       <Name>GitlabEvent</Name>
       <ViewSelectedBy>
         <TypeName>Gitlab.Event</TypeName>

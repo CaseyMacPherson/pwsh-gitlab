@@ -158,6 +158,8 @@
         # Groups
         'Copy-GitlabGroupToLocalFileSystem'
         'Get-GitlabGroup'
+        'Get-GitlabGroupSharedGroup'
+        'Get-GitlabGroupSharedProject'
         'Get-GitlabGroupVariable'
         'Move-GitlabGroup'
         'New-GitlabGroup'
@@ -392,6 +394,9 @@
         'Add-GitlabUserMembership'
         'Update-GitlabUserMembership'
         'Remove-GitlabUserMembership'
+
+        'Get-GitlabProjectMembershipReport'
+        'Get-GitlabGroupMembershipReport'
 
         # Utilities
         'ConvertTo-GitlabVariables'

@@ -231,6 +231,36 @@ function Remove-GitlabGroupMember {
     }
 }
 
+function Get-GitlabProjectInvitedGroup {
+    [CmdletBinding()]
+    [OutputType('Gitlab.Group')]
+    param (
+        [Parameter(Position=0, ValueFromPipelineByPropertyName)]
+        [string]
+        $ProjectId = '.',
+
+        [Parameter()]
+        [string]
+        $SiteUrl,
+
+        [Parameter()]
+        [uint]
+        $MaxPages,
+
+        [Parameter()]
+        [switch]
+        $All
+    )
+
+    $MaxPages = Resolve-GitlabMaxPages -MaxPages:$MaxPages -All:$All
+
+    $ProjectId = Resolve-GitlabProjectId $ProjectId
+
+    # https://docs.gitlab.com/api/projects/#list-all-invited-groups-in-a-project
+    Invoke-GitlabApi GET "projects/$ProjectId/invited_groups" -MaxPages $MaxPages |
+        New-GitlabObject 'Gitlab.Group'
+}
+
 function Get-GitlabProjectMember {
     [CmdletBinding()]
     [OutputType('Gitlab.Member')]
@@ -585,4 +615,519 @@ function Update-GitlabUserMembership {
     }
 
     $Rows | New-GitlabObject 'Gitlab.Member'
+}
+
+function Get-GitlabGroupAncestor {
+    [CmdletBinding()]
+    [OutputType('Gitlab.Group')]
+    param (
+        [Parameter(Mandatory)]
+        [string]
+        $FullPath
+    )
+
+    $Parts = $FullPath -split '/'
+    if ($Parts.Count -le 1) {
+        return
+    }
+
+    for ($i = $Parts.Count - 1; $i -ge 1; $i--) {
+        $AncestorPath = ($Parts[0..($i - 1)]) -join '/'
+        Get-GitlabGroup -GroupId $AncestorPath
+    }
+}
+
+function Resolve-AccessLevelName {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param (
+        [Parameter(Mandatory)]
+        [int]
+        $AccessLevel
+    )
+
+    $Levels = Get-GitlabMemberAccessLevel
+    $Match = $Levels.psobject.Properties | Where-Object Value -eq $AccessLevel | Select-Object -ExpandProperty Name
+    if ($Match) { $Match } else { $AccessLevel.ToString() }
+}
+
+function Build-MembershipSourceReport {
+    [CmdletBinding()]
+    [OutputType('Gitlab.MembershipReport')]
+    param (
+        [Parameter()]
+        [array]
+        $Entries
+    )
+
+    if (-not $Entries -or $Entries.Count -eq 0) {
+        return
+    }
+
+    $Grouped = $Entries | Group-Object -Property UserId
+
+    foreach ($UserGroup in $Grouped) {
+        $Sources = $UserGroup.Group
+        # Use the effective access level from members/all if provided, otherwise compute max
+        $EffectiveAccessLevel = if ($null -ne $Sources[0].EffectiveAccessLevel) {
+            $Sources[0].EffectiveAccessLevel
+        } else {
+            ($Sources | Measure-Object -Property AccessLevel -Maximum).Maximum
+        }
+        $EffectiveAccessLevelName = Resolve-AccessLevelName $EffectiveAccessLevel
+
+        $SourceDetails = $Sources | ForEach-Object {
+            $SourceAccessLevelName = Resolve-AccessLevelName $_.AccessLevel
+            [PSCustomObject]@{
+                SourceType           = $_.SourceType
+                SourceName           = $_.SourceName
+                SourcePath           = $_.SourcePath
+                AccessLevel          = $_.AccessLevel
+                AccessLevelName      = $SourceAccessLevelName
+                DiffersFromEffective = $_.AccessLevel -ne $EffectiveAccessLevel
+            }
+        }
+
+        $Report = [PSCustomObject]@{
+            PSTypeName            = 'Gitlab.MembershipReport'
+            UserId                = [int]$UserGroup.Name
+            Username              = $Sources[0].Username
+            Name                  = $Sources[0].Name
+            EffectiveAccessLevel  = $EffectiveAccessLevel
+            EffectiveAccessLevelName = $EffectiveAccessLevelName
+            Sources               = $SourceDetails
+            SourceCount           = $SourceDetails.Count
+            IsOverlapping         = $SourceDetails.Count -gt 1
+            HasDifferingAccess    = ($SourceDetails | Where-Object DiffersFromEffective).Count -gt 0
+        }
+        $Report
+    }
+}
+
+function Get-GitlabProjectMembershipReport {
+    [CmdletBinding()]
+    [OutputType('Gitlab.MembershipReport')]
+    param (
+        [Parameter(Position=0, ValueFromPipelineByPropertyName)]
+        [string]
+        $ProjectId = '.',
+
+        [Parameter()]
+        [string]
+        $SiteUrl
+    )
+
+    $Project = Get-GitlabProject -ProjectId $ProjectId
+
+    # Build a map of invited group ID -> invitation access level
+    # from shared_with_groups on the project and each group in the hierarchy
+    $InvitationAccessMap = @{} # GroupId -> max invitation access level across all sharing points
+    $InvitationSourceMap = @{} # GroupId -> @{ ViaType; ViaPath } tracking where the group was shared
+
+    # Project-level shares
+    if ($Project.SharedWithGroups) {
+        foreach ($swg in $Project.SharedWithGroups) {
+            $gid = $swg.group_id
+            $level = $swg.group_access_level
+            if (-not $InvitationAccessMap.ContainsKey($gid) -or $level -gt $InvitationAccessMap[$gid]) {
+                $InvitationAccessMap[$gid] = $level
+            }
+            $InvitationSourceMap[$gid] = @{
+                ViaType = 'InvitedGroup'
+                ViaPath = $Project.PathWithNamespace
+            }
+        }
+    }
+
+    # Collect the universe of known sources
+    # 1. Direct project members
+    $DirectProjectMembers = Get-GitlabProjectMember -ProjectId $Project.Id -All
+    $DirectProjectIndex = @{}
+    foreach ($m in $DirectProjectMembers) {
+        $DirectProjectIndex[$m.Id] = $m
+    }
+
+    # 2. Project's group hierarchy (direct parent + ancestors)
+    $GroupPath = ($Project.PathWithNamespace -split '/')[0..($Project.PathWithNamespace.Split('/').Count - 2)] -join '/'
+    $GroupSources = @{} # GroupId -> { Group, SourceType, Members }
+    if ($GroupPath) {
+        $Group = Get-GitlabGroup -GroupId $GroupPath
+        $GroupMembers = Get-GitlabGroupMember -GroupId $Group.Id -All
+        $GroupSources[$Group.Id] = @{
+            Group      = $Group
+            SourceType = 'Direct'
+            Members    = @{}
+        }
+        foreach ($m in $GroupMembers) {
+            $GroupSources[$Group.Id].Members[$m.Id] = $m
+        }
+
+        # Group-level shares (groups shared with this group)
+        if ($Group.SharedWithGroups) {
+            foreach ($swg in $Group.SharedWithGroups) {
+                $gid = $swg.group_id
+                $level = $swg.group_access_level
+                if (-not $InvitationAccessMap.ContainsKey($gid) -or $level -gt $InvitationAccessMap[$gid]) {
+                    $InvitationAccessMap[$gid] = $level
+                }
+                if (-not $InvitationSourceMap.ContainsKey($gid)) {
+                    $InvitationSourceMap[$gid] = @{
+                        ViaType = 'InheritedGroupVia'
+                        ViaPath = $Group.FullPath
+                    }
+                }
+            }
+        }
+
+        $Ancestors = Get-GitlabGroupAncestor -FullPath $Group.FullPath
+        foreach ($Ancestor in $Ancestors) {
+            $AncestorMembers = Get-GitlabGroupMember -GroupId $Ancestor.Id -All
+            $GroupSources[$Ancestor.Id] = @{
+                Group      = $Ancestor
+                SourceType = 'InheritedGroup'
+                Members    = @{}
+            }
+            foreach ($m in $AncestorMembers) {
+                $GroupSources[$Ancestor.Id].Members[$m.Id] = $m
+            }
+
+            # Ancestor-level shares
+            if ($Ancestor.SharedWithGroups) {
+                foreach ($swg in $Ancestor.SharedWithGroups) {
+                    $gid = $swg.group_id
+                    $level = $swg.group_access_level
+                    if (-not $InvitationAccessMap.ContainsKey($gid) -or $level -gt $InvitationAccessMap[$gid]) {
+                        $InvitationAccessMap[$gid] = $level
+                    }
+                    if (-not $InvitationSourceMap.ContainsKey($gid)) {
+                        $InvitationSourceMap[$gid] = @{
+                            ViaType = 'InheritedGroupVia'
+                            ViaPath = $Ancestor.FullPath
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    # 3. Invited/shared groups (project-level + group-level shares)
+    $InvitedGroupSources = @{} # GroupId -> { Group, Members, InvitationAccessLevel }
+
+    # Collect all shared group IDs from the InvitationAccessMap (populated from
+    # SharedWithGroups on the project and each group in the hierarchy)
+    $SharedGroupIds = @($InvitationAccessMap.Keys)
+
+    # Also fetch project-level invited groups (in case they aren't in SharedWithGroups)
+    $ProjectInvitedGroups = Get-GitlabProjectInvitedGroup -ProjectId $Project.Id -All
+    foreach ($ig in $ProjectInvitedGroups) {
+        if ($SharedGroupIds -notcontains $ig.Id) {
+            $SharedGroupIds += $ig.Id
+        }
+        if (-not $InvitationSourceMap.ContainsKey($ig.Id)) {
+            $InvitationSourceMap[$ig.Id] = @{
+                ViaType = 'InvitedGroup'
+                ViaPath = $Project.PathWithNamespace
+            }
+        }
+    }
+
+    foreach ($gid in $SharedGroupIds) {
+        # Skip groups already in the hierarchy (they are accounted for as Direct/InheritedGroup)
+        if ($GroupSources.ContainsKey($gid)) {
+            continue
+        }
+        try {
+            $SharedGroup = Get-GitlabGroup -GroupId $gid
+        } catch {
+            continue
+        }
+        # Use -IncludeInherited to get all effective members of the shared group
+        $InvitedMembers = Get-GitlabGroupMember -GroupId $gid -IncludeInherited -All
+        $InvitationAccessLevel = if ($InvitationAccessMap.ContainsKey($gid)) { $InvitationAccessMap[$gid] } else { $null }
+        $InvitationSource = if ($InvitationSourceMap.ContainsKey($gid)) { $InvitationSourceMap[$gid] } else { @{ ViaType = 'InvitedGroup'; ViaPath = '' } }
+        $InvitedGroupSources[$gid] = @{
+            Group                 = $SharedGroup
+            Members               = @{}
+            InvitationAccessLevel = $InvitationAccessLevel
+            InvitationSource      = $InvitationSource
+        }
+        foreach ($m in $InvitedMembers) {
+            $InvitedGroupSources[$gid].Members[$m.Id] = $m
+        }
+    }
+
+    # Get all effective members (includes inherited + invited)
+    $AllEffectiveMembers = Get-GitlabProjectMember -ProjectId $Project.Id -IncludeInherited -All
+    $EffectiveIndex = @{} # UserId -> effective access level from members/all
+    foreach ($em in $AllEffectiveMembers) {
+        $EffectiveIndex[$em.Id] = $em.AccessLevel
+    }
+
+    $Entries = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+    foreach ($em in $AllEffectiveMembers) {
+        $FoundSources = @()
+
+        # Check direct project membership
+        if ($DirectProjectIndex.ContainsKey($em.Id)) {
+            $FoundSources += [PSCustomObject]@{
+                SourceType = 'Direct'
+                SourceName = $Project.Name
+                SourcePath = $Project.PathWithNamespace
+                AccessLevel = $DirectProjectIndex[$em.Id].AccessLevel
+            }
+        }
+
+        # Check group hierarchy
+        foreach ($gs in $GroupSources.Values) {
+            if ($gs.Members.ContainsKey($em.Id)) {
+                $FoundSources += [PSCustomObject]@{
+                    SourceType = $gs.SourceType
+                    SourceName = $gs.Group.Name
+                    SourcePath = $gs.Group.FullPath
+                    AccessLevel = $gs.Members[$em.Id].AccessLevel
+                }
+            }
+        }
+
+        # Check invited groups (cap access at invitation level)
+        foreach ($igs in $InvitedGroupSources.Values) {
+            if ($igs.Members.ContainsKey($em.Id)) {
+                $MemberAccessLevel = $igs.Members[$em.Id].AccessLevel
+                if ($null -ne $igs.InvitationAccessLevel) {
+                    $MemberAccessLevel = [Math]::Min($MemberAccessLevel, $igs.InvitationAccessLevel)
+                }
+                $SourceType = $igs.InvitationSource.ViaType
+                $SourceName = if ($SourceType -eq 'InheritedGroupVia') {
+                    "$($igs.Group.Name) (from parent group $($igs.InvitationSource.ViaPath))"
+                } else {
+                    $igs.Group.Name
+                }
+                $FoundSources += [PSCustomObject]@{
+                    SourceType  = $SourceType
+                    SourceName  = $SourceName
+                    SourcePath  = $igs.Group.FullPath
+                    AccessLevel = $MemberAccessLevel
+                }
+            }
+        }
+
+        if ($FoundSources.Count -eq 0) {
+            $FoundSources += [PSCustomObject]@{
+                SourceType  = 'Inherited'
+                SourceName  = ''
+                SourcePath  = ''
+                AccessLevel = $EffectiveIndex[$em.Id]
+            }
+        }
+
+        foreach ($src in $FoundSources) {
+            $Entries.Add([PSCustomObject]@{
+                UserId               = $em.Id
+                Username             = $em.Username
+                Name                 = $em.Name
+                AccessLevel          = $src.AccessLevel
+                EffectiveAccessLevel = $EffectiveIndex[$em.Id]
+                SourceType           = $src.SourceType
+                SourceName           = $src.SourceName
+                SourcePath           = $src.SourcePath
+            })
+        }
+    }
+
+    $Report = Build-MembershipSourceReport -Entries $Entries
+
+    $Report | Sort-Object -Property @(
+        @{ Expression = 'EffectiveAccessLevel'; Descending = $true },
+        @{ Expression = 'Username'; Descending = $false }
+    )
+}
+
+function Get-GitlabGroupMembershipReport {
+    [CmdletBinding()]
+    [OutputType('Gitlab.MembershipReport')]
+    param (
+        [Parameter(Position=0, ValueFromPipelineByPropertyName)]
+        [string]
+        $GroupId = '.',
+
+        [Parameter()]
+        [string]
+        $SiteUrl
+    )
+
+    $Group = Get-GitlabGroup -GroupId $GroupId
+
+    # Build invitation access level map from shared_with_groups
+    $InvitationAccessMap = @{}
+    $InvitationSourceMap = @{}
+    if ($Group.SharedWithGroups) {
+        foreach ($swg in $Group.SharedWithGroups) {
+            $gid = $swg.group_id
+            $level = $swg.group_access_level
+            if (-not $InvitationAccessMap.ContainsKey($gid) -or $level -gt $InvitationAccessMap[$gid]) {
+                $InvitationAccessMap[$gid] = $level
+            }
+            $InvitationSourceMap[$gid] = @{
+                ViaType = 'InvitedGroup'
+                ViaPath = $Group.FullPath
+            }
+        }
+    }
+
+    # Collect the universe of known sources
+    # 1. Direct group members
+    $DirectMembers = Get-GitlabGroupMember -GroupId $Group.Id -All
+    $DirectIndex = @{}
+    foreach ($m in $DirectMembers) {
+        $DirectIndex[$m.Id] = $m
+    }
+
+    # 2. Shared/invited groups
+    $InvitedGroupSources = @{}
+    $SharedGroupIds = @($InvitationAccessMap.Keys)
+
+    # 3. Ancestor groups
+    $AncestorSources = @{}
+    $Ancestors = Get-GitlabGroupAncestor -FullPath $Group.FullPath
+    foreach ($Ancestor in $Ancestors) {
+        $AncestorMembers = Get-GitlabGroupMember -GroupId $Ancestor.Id -All
+        $AncestorSources[$Ancestor.Id] = @{
+            Group   = $Ancestor
+            Members = @{}
+        }
+        foreach ($m in $AncestorMembers) {
+            $AncestorSources[$Ancestor.Id].Members[$m.Id] = $m
+        }
+
+        # Ancestor-level shares
+        if ($Ancestor.SharedWithGroups) {
+            foreach ($swg in $Ancestor.SharedWithGroups) {
+                $gid = $swg.group_id
+                $level = $swg.group_access_level
+                if (-not $InvitationAccessMap.ContainsKey($gid) -or $level -gt $InvitationAccessMap[$gid]) {
+                    $InvitationAccessMap[$gid] = $level
+                }
+                if (-not $InvitationSourceMap.ContainsKey($gid)) {
+                    $InvitationSourceMap[$gid] = @{
+                        ViaType = 'InheritedGroupVia'
+                        ViaPath = $Ancestor.FullPath
+                    }
+                }
+            }
+        }
+
+    }
+
+    # Fetch members for all shared groups
+    foreach ($gid in $SharedGroupIds) {
+        # Skip groups already in the hierarchy
+        if ($AncestorSources.ContainsKey($gid)) {
+            continue
+        }
+        try {
+            $SharedGroup = Get-GitlabGroup -GroupId $gid
+        } catch {
+            continue
+        }
+        # Use -IncludeInherited to get all effective members of the shared group
+        $SharedGroupMembers = Get-GitlabGroupMember -GroupId $gid -IncludeInherited -All
+        $InvitationAccessLevel = if ($InvitationAccessMap.ContainsKey($gid)) { $InvitationAccessMap[$gid] } else { $null }
+        $InvitationSource = if ($InvitationSourceMap.ContainsKey($gid)) { $InvitationSourceMap[$gid] } else { @{ ViaType = 'InvitedGroup'; ViaPath = '' } }
+        $InvitedGroupSources[$gid] = @{
+            Group                 = $SharedGroup
+            Members               = @{}
+            InvitationAccessLevel = $InvitationAccessLevel
+            InvitationSource      = $InvitationSource
+        }
+        foreach ($m in $SharedGroupMembers) {
+            $InvitedGroupSources[$gid].Members[$m.Id] = $m
+        }
+    }
+
+    # Get all effective members (includes inherited + invited)
+    $AllEffectiveMembers = Get-GitlabGroupMember -GroupId $Group.Id -IncludeInherited -All
+    $EffectiveIndex = @{}
+    foreach ($em in $AllEffectiveMembers) {
+        $EffectiveIndex[$em.Id] = $em.AccessLevel
+    }
+
+    $Entries = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+    foreach ($em in $AllEffectiveMembers) {
+        $FoundSources = @()
+
+        # Check direct group membership
+        if ($DirectIndex.ContainsKey($em.Id)) {
+            $FoundSources += [PSCustomObject]@{
+                SourceType  = 'Direct'
+                SourceName  = $Group.Name
+                SourcePath  = $Group.FullPath
+                AccessLevel = $DirectIndex[$em.Id].AccessLevel
+            }
+        }
+
+        # Check invited groups (cap access at invitation level)
+        foreach ($igs in $InvitedGroupSources.Values) {
+            if ($igs.Members.ContainsKey($em.Id)) {
+                $MemberAccessLevel = $igs.Members[$em.Id].AccessLevel
+                if ($null -ne $igs.InvitationAccessLevel) {
+                    $MemberAccessLevel = [Math]::Min($MemberAccessLevel, $igs.InvitationAccessLevel)
+                }
+                $SourceType = $igs.InvitationSource.ViaType
+                $SourceName = if ($SourceType -eq 'InheritedGroupVia') {
+                    "$($igs.Group.Name) (via $($igs.InvitationSource.ViaPath))"
+                } else {
+                    $igs.Group.Name
+                }
+                $FoundSources += [PSCustomObject]@{
+                    SourceType  = $SourceType
+                    SourceName  = $SourceName
+                    SourcePath  = $igs.Group.FullPath
+                    AccessLevel = $MemberAccessLevel
+                }
+            }
+        }
+
+        # Check ancestor groups
+        foreach ($as in $AncestorSources.Values) {
+            if ($as.Members.ContainsKey($em.Id)) {
+                $FoundSources += [PSCustomObject]@{
+                    SourceType  = 'InheritedGroup'
+                    SourceName  = $as.Group.Name
+                    SourcePath  = $as.Group.FullPath
+                    AccessLevel = $as.Members[$em.Id].AccessLevel
+                }
+            }
+        }
+
+        if ($FoundSources.Count -eq 0) {
+            $FoundSources += [PSCustomObject]@{
+                SourceType  = 'Inherited'
+                SourceName  = ''
+                SourcePath  = ''
+                AccessLevel = $EffectiveIndex[$em.Id]
+            }
+        }
+
+        foreach ($src in $FoundSources) {
+            $Entries.Add([PSCustomObject]@{
+                UserId               = $em.Id
+                Username             = $em.Username
+                Name                 = $em.Name
+                AccessLevel          = $src.AccessLevel
+                EffectiveAccessLevel = $EffectiveIndex[$em.Id]
+                SourceType           = $src.SourceType
+                SourceName           = $src.SourceName
+                SourcePath           = $src.SourcePath
+            })
+        }
+    }
+
+    $Report = Build-MembershipSourceReport -Entries $Entries
+
+    $Report | Sort-Object -Property @(
+        @{ Expression = 'EffectiveAccessLevel'; Descending = $true },
+        @{ Expression = 'Username'; Descending = $false }
+    )
 }
