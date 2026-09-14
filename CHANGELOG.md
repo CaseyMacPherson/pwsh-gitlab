@@ -5,8 +5,10 @@ All notable changes to GitlabCli are recorded here, newest first.
 ## [Unreleased]
 
 ### Changes
-- `Get-GitlabBranch` reports a branch's tip-commit date as `UpdatedAt`, the name every other type uses for the same thing. Scripts reading `LastUpdated` need updating.
-- Listings come back sorted without each cmdlet arranging it. A type that defines its own `SortKey` (issues, merge requests) is sorted by it; anything else with a last-updated timestamp comes back most recent first. Passing `-Sort` or `-OrderBy` leaves the server's ordering intact.
+- Listings come back sorted by default. Issues and merge requests sort by their GitLab reference (`group/project#7`, `group/project!7`); anything else carrying a last-updated timestamp comes back most recent first. Passing `-Sort` or `-OrderBy` leaves the server's ordering alone.
+- `Get-GitlabMergeRequest` groups by project and merge request iid rather than by project path alone.
+- `Get-GitlabIssueNote` returns the newest comment first.
+- `Get-GitlabBranch` reports a branch's tip-commit date as `UpdatedAt` rather than `LastUpdated`, matching every other type. Scripts reading `LastUpdated` need updating.
 
 ## [1.172.3] - 2026-09-12
 
