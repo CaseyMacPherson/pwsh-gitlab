@@ -125,8 +125,7 @@ function Get-GitlabIssue {
     }
 
     Invoke-GitlabApi GET $Path $Query -MaxPages $MaxPages |
-        New-GitlabObject 'Gitlab.Issue' |
-        Sort-Object SortKey
+        New-GitlabObject 'Gitlab.Issue'
 }
 
 function New-GitlabIssue {

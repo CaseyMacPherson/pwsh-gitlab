@@ -206,7 +206,7 @@ function Get-GitlabMergeRequest {
         }
     }
 
-    $MergeRequests | Sort-Object ProjectPath
+    $MergeRequests
 }
 
 function New-GitlabMergeRequest {

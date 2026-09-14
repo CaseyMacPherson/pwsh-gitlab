@@ -12,13 +12,13 @@
         <GetScriptBlock>$this.Commit.author_name</GetScriptBlock>
       </ScriptProperty>
       <ScriptProperty>
-        <Name>LastUpdated</Name>
+        <Name>UpdatedAt</Name>
         <GetScriptBlock>
-        $LastUpdated = $this.Commit.authored_date
-        if ($this.Commit.committed_date -gt $LastUpdated) {
-          $LastUpdated = $this.Commit.committed_date
+        $UpdatedAt = $this.Commit.authored_date
+        if ($this.Commit.committed_date -gt $UpdatedAt) {
+          $UpdatedAt = $this.Commit.committed_date
         }
-        $LastUpdated
+        $UpdatedAt
         </GetScriptBlock>
       </ScriptProperty>
     </Members>
@@ -63,10 +63,11 @@
       <ScriptProperty>
         <Name>SortKey</Name>
         <GetScriptBlock>
+        # the leading digit keeps due-dated issues ahead of the rest whatever a project path starts with
         if ($this.DueDate) {
-          $this.DueDate
+          "0 $(([datetime] $this.DueDate).ToString('yyyy-MM-dd'))"
         } else {
-          "$($this.ProjectPath)/$($this.IssueId)"
+          "1 $($this.ProjectPath)#$($this.IssueId)"
         }
         </GetScriptBlock>
       </ScriptProperty>
@@ -86,6 +87,16 @@
       <ScriptProperty>
         <Name>ProjectPath</Name>
         <GetScriptBlock>$this.WebUrl -match '://[\w\.]+/(?&lt;ProjectPath&gt;.*)/-' | Out-Null; $Matches.ProjectPath</GetScriptBlock>
+      </ScriptProperty>
+      <ScriptProperty>
+        <Name>GroupPath</Name>
+        <GetScriptBlock>$($this.ProjectPath -split '/' | Select -SkipLast 1) -join '/'</GetScriptBlock>
+      </ScriptProperty>
+      <ScriptProperty>
+        <Name>SortKey</Name>
+        <GetScriptBlock>
+          "$($this.ProjectPath)!$($this.MergeRequestId)"
+        </GetScriptBlock>
       </ScriptProperty>
     </Members>
   </Type>

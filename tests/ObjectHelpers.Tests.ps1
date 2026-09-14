@@ -171,6 +171,61 @@ Describe "New-GitlabObject" {
         }
     }
 
+    Context "Default sort" {
+        It "Should sort by SortKey when the type has one" {
+            $Items = @(
+                [PSCustomObject]@{ name = 'charlie'; sort_key = 'c' }
+                [PSCustomObject]@{ name = 'alpha';   sort_key = 'a' }
+                [PSCustomObject]@{ name = 'bravo';   sort_key = 'b' }
+            )
+            $Results = $Items | New-GitlabObject
+            $Results.Name | Should -Be @('alpha', 'bravo', 'charlie')
+        }
+
+        It "Should fall back to the most recently updated when there is no SortKey" {
+            $Items = @(
+                [PSCustomObject]@{ name = 'oldest'; updated_at = '2026-09-01T00:00:00Z' }
+                [PSCustomObject]@{ name = 'newest'; updated_at = '2026-09-03T00:00:00Z' }
+                [PSCustomObject]@{ name = 'middle'; updated_at = '2026-09-02T00:00:00Z' }
+            )
+            $Results = $Items | New-GitlabObject
+            $Results.Name | Should -Be @('newest', 'middle', 'oldest')
+        }
+
+        It "Should prefer SortKey over a timestamp" {
+            $Items = @(
+                [PSCustomObject]@{ name = 'bravo'; sort_key = 'b'; updated_at = '2026-09-03T00:00:00Z' }
+                [PSCustomObject]@{ name = 'alpha'; sort_key = 'a'; updated_at = '2026-09-01T00:00:00Z' }
+            )
+            $Results = $Items | New-GitlabObject
+            $Results.Name | Should -Be @('alpha', 'bravo')
+        }
+
+        It "Should preserve API order when there is nothing to sort on" {
+            $Items = @(
+                [PSCustomObject]@{ name = 'zulu' }
+                [PSCustomObject]@{ name = 'alpha' }
+            )
+            $Results = $Items | New-GitlabObject
+            $Results.Name | Should -Be @('zulu', 'alpha')
+        }
+
+        It "Should leave the order alone when the caller was given -<Parameter>" -ForEach @(
+            @{ Parameter = 'Sort' }
+            @{ Parameter = 'OrderBy' }
+        ) {
+            function Get-Thing {
+                param($Sort, $OrderBy)
+                @(
+                    [PSCustomObject]@{ name = 'oldest'; updated_at = '2026-09-01T00:00:00Z' }
+                    [PSCustomObject]@{ name = 'newest'; updated_at = '2026-09-03T00:00:00Z' }
+                ) | New-GitlabObject
+            }
+            $Arguments = @{ $Parameter = 'asc' }
+            (Get-Thing @Arguments).Name | Should -Be @('oldest', 'newest')
+        }
+    }
+
     Context "Positional parameter" {
         It "Should accept DisplayType as positional parameter" {
             $Input = [PSCustomObject]@{ id = 1 }

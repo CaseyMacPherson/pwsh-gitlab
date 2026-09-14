@@ -52,8 +52,7 @@ function Get-GitlabBranch {
 
     Invoke-GitlabApi @Request |
         New-GitlabObject 'Gitlab.Branch' |
-        Add-Member -NotePropertyMembers @{ ProjectId = $ProjectId } -PassThru |
-        Sort-Object -Descending LastUpdated
+        Add-Member -NotePropertyMembers @{ ProjectId = $ProjectId } -PassThru
 }
 
 function Get-GitlabProtectedBranch {

@@ -28,6 +28,49 @@ function Add-CoalescedProperty {
     }
 }
 
+function Get-GitlabDefaultSortProperty {
+    param (
+        [Parameter(Mandatory, Position=0)]
+        $Object
+    )
+
+    # a type that defines a SortKey picks its own ordering; everything else
+    # falls back to the first of these it has, most recent first
+    $RecencyPropertyNames = @('UpdatedAt', 'LastActivityAt')
+
+    $PropertyNames = $Object.PSObject.Properties.Name
+
+    if ($PropertyNames -contains 'SortKey') {
+        return @{ Property = 'SortKey'; Descending = $false }
+    }
+
+    foreach ($Candidate in $RecencyPropertyNames) {
+        if ($PropertyNames -contains $Candidate) {
+            return @{ Property = $Candidate; Descending = $true }
+        }
+    }
+}
+
+function Test-GitlabSortPreference {
+    # a caller that was given -Sort or -OrderBy is passing the user's ordering
+    # through to the API; leave that result in the order it came back
+    $CallStack = Get-PSCallStack
+    for ($i = 1; $i -lt $CallStack.Count; $i++) {
+        $BoundParameters = $CallStack[$i].InvocationInfo.BoundParameters
+        if (-not $BoundParameters) {
+            continue
+        }
+        foreach ($Name in 'Sort', 'OrderBy') {
+            $Value = $null
+            if ($BoundParameters.TryGetValue($Name, [ref] $Value) -and -not [string]::IsNullOrWhiteSpace($Value)) {
+                Write-Verbose "Sort: $Name was passed to [$($CallStack[$i].InvocationInfo.MyCommand.Name)], skipping default sort"
+                return $true
+            }
+        }
+    }
+    $false
+}
+
 function New-GitlabObject {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Creates PSCustomObject wrappers, not a state-changing operation')]
     [CmdletBinding()]
@@ -43,7 +86,9 @@ function New-GitlabObject {
         [switch]
         $PreserveCasing
     )
-    Begin{}
+    Begin {
+        $Wrappers = New-Object 'Collections.Generic.List[object]'
+    }
     Process {
         foreach ($item in $InputObject) {
             if ($item -is [hashtable]) {
@@ -89,8 +134,20 @@ function New-GitlabObject {
                     }
                 }
             }
-            Write-Output $Wrapper
+            $Wrappers.Add($Wrapper)
         }
     }
-    End{}
+    End {
+        if ($Wrappers.Count -lt 2 -or (Test-GitlabSortPreference)) {
+            Write-Output $Wrappers
+            return
+        }
+
+        $Sort = Get-GitlabDefaultSortProperty $Wrappers[0]
+        if ($Sort) {
+            $Wrappers | Sort-Object -Property $Sort.Property -Descending:$Sort.Descending
+        } else {
+            Write-Output $Wrappers
+        }
+    }
 }
