@@ -4,6 +4,8 @@ All notable changes to GitlabCli are recorded here, newest first.
 
 ## [Unreleased]
 
+## [1.173.0] - 2026-09-14
+
 ### Changes
 - Listings come back sorted by default. Issues and merge requests sort by their GitLab reference (`group/project#7`, `group/project!7`); anything else carrying a last-updated timestamp comes back most recent first. Passing `-Sort` or `-OrderBy` leaves the server's ordering alone.
 - `Get-GitlabMergeRequest` groups by project and merge request iid rather than by project path alone.
