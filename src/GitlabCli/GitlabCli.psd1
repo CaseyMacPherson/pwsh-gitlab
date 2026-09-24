@@ -234,8 +234,12 @@
         # Notes
         'Get-GitlabIssueNote'
         'New-GitlabIssueNote'
+        'Update-GitlabIssueNote'
+        'Remove-GitlabIssueNote'
         'Get-GitlabMergeRequestNote'
         'New-GitlabMergeRequestNote'
+        'Update-GitlabMergeRequestNote'
+        'Remove-GitlabMergeRequestNote'
 
         # MergeRequests
         'Get-GitlabMergeRequest'
