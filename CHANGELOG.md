@@ -4,6 +4,9 @@ All notable changes to GitlabCli are recorded here, newest first.
 
 ## [Unreleased]
 
+### Changes
+- Added `New-GitlabMergeRequestNote` (alias `Add-GitlabMergeRequestNote`) to add comments to merge requests, matching the existing `New-GitlabIssueNote` cmdlet.
+
 ## [1.173.0] - 2026-09-14
 
 ### Changes

@@ -26,3 +26,4 @@ New-GitlabIssueNote -ProjectId 'mygroup/myproject' -IssueId 123 -Body 'Thanks fo
 | [Get-GitlabIssueNote](Notes/Get-GitlabIssueNote.md) | Gets issue comments |
 | [Get-GitlabMergeRequestNote](Notes/Get-GitlabMergeRequestNote.md) | Gets merge request comments |
 | [New-GitlabIssueNote](Notes/New-GitlabIssueNote.md) | Creates a new issue comment |
+| [New-GitlabMergeRequestNote](Notes/New-GitlabMergeRequestNote.md) | Creates a new merge request comment |

@@ -7,3 +7,4 @@ Manage GitlabCli
 | Cmdlet | Description |
 |--------|-------------|
 | [Get-GitlabMergeRequestApproval](GitlabCli/Get-GitlabMergeRequestApproval.md) | |
+| [New-GitlabMergeRequestNote](GitlabCli/New-GitlabMergeRequestNote.md) | |

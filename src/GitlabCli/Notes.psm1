@@ -85,3 +85,33 @@ function Get-GitlabMergeRequestNote {
 
     Invoke-GitlabApi GET $Url | New-GitlabObject 'Gitlab.Note'
 }
+
+function New-GitlabMergeRequestNote {
+    [Alias('Add-GitlabMergeRequestNote')]
+    [CmdletBinding(SupportsShouldProcess)]
+    [OutputType('Gitlab.Note')]
+    param (
+        [Parameter(ValueFromPipelineByPropertyName)]
+        [string]
+        $ProjectId = '.',
+
+        [Parameter(ValueFromPipelineByPropertyName)]
+        [string]
+        $MergeRequestId,
+
+        [Parameter(Position=0, Mandatory)]
+        [string]
+        $Note,
+
+        [Parameter()]
+        [string]
+        $SiteUrl
+    )
+
+    $ProjectId = Resolve-GitlabProjectId $ProjectId
+
+    if ($PSCmdlet.ShouldProcess("MR #$MergeRequestId", "Create new merge request note ($Note)")) {
+        # https://docs.gitlab.com/ee/api/notes.html#create-a-merge-request-note
+        Invoke-GitlabApi POST "projects/$ProjectId/merge_requests/$MergeRequestId/notes" -Body @{body = $Note} | New-GitlabObject 'Gitlab.Note'
+    }
+}

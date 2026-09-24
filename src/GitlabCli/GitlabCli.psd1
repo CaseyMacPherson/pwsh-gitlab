@@ -235,6 +235,7 @@
         'Get-GitlabIssueNote'
         'New-GitlabIssueNote'
         'Get-GitlabMergeRequestNote'
+        'New-GitlabMergeRequestNote'
 
         # MergeRequests
         'Get-GitlabMergeRequest'
@@ -397,6 +398,7 @@
     )
     AliasesToExport = @(
         'Add-GitlabIssueNote'
+        'Add-GitlabMergeRequestNote'
         'Add-GitlabProjectHook'
         'Archive-GitlabProject'
         'Clone-GitlabGroup'
