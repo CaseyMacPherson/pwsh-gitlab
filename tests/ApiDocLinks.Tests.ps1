@@ -1,3 +1,20 @@
+BeforeDiscovery {
+    $SourceFiles = Get-ChildItem -Path "$PSScriptRoot/../src" -Recurse -Include '*.psm1', '*.ps1'
+    $Links = $SourceFiles | ForEach-Object {
+        $File = $_
+        Select-String -Path $File.FullName -Pattern 'https://docs\.gitlab\.com[^\s)]+' -AllMatches |
+            ForEach-Object {
+                $_.Matches | ForEach-Object {
+                    @{
+                        Url  = $_.Value
+                        File = $File.Name
+                        Line = $_.Groups[0].Value
+                    }
+                }
+            }
+    } | Sort-Object -Property Url -Unique
+}
+
 Describe "API Documentation Links" -Tag 'Online' {
     BeforeAll {
         $SourceFiles = Get-ChildItem -Path "$PSScriptRoot/../src" -Recurse -Include '*.psm1', '*.ps1'
