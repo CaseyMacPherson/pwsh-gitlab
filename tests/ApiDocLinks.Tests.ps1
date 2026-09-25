@@ -39,6 +39,14 @@ Describe "API Documentation Links" -Tag 'Online' {
 
     It "<Url> is valid (from <File>)" -ForEach $Links {
         $Response = Invoke-WebRequest -Uri $Url -Method Head -MaximumRedirection 5 -SkipHttpErrorCheck
-        $Response.StatusCode | Should -Be 200
+        if ($Response.StatusCode -eq 403 -and $Response.Headers['Cf-Mitigated'] -contains 'challenge') {
+            # GitLab's docs site puts some automated clients through a Cloudflare bot
+            # challenge; a 403 carrying this header means the link exists but the
+            # request was blocked, not that the page is gone.
+            Set-ItResult -Skipped -Because 'blocked by a Cloudflare bot challenge, not a dead link'
+        }
+        else {
+            $Response.StatusCode | Should -Be 200
+        }
     }
 }
